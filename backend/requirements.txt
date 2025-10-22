@@ -1,0 +1,11 @@
+fastapi==0.99.0
+uvicorn[standard]==0.23.1
+pillow==10.0.1
+# allow any 8.x ultralytics release; use a recent compatible version
+ultralytics>=8.0.0,<9.0.0
+# numpy: prefer a recent release but let pip pick a wheel compatible with the
+# local Python. If you run into Python-version conflicts, create a venv with
+# Python 3.11 or use the system Python that matches available numpy wheels.
+# numpy==1.26.4
+python-multipart==0.0.6
+requests==2.31.0
