@@ -15,8 +15,22 @@ final Duration _windowsDetectionInterval = const Duration(milliseconds: 700);
 // Backend config - change if your FastAPI server lives elsewhere
 const String _detectionBackendUrl = 'http://localhost:8000/detect';
 
+// Simple model for a detected frame returned by the backend
+class DetectedFrame {
+  final Uint8List? imageBytes; // optional raw image bytes (PNG/JPEG)
+  final List<Rect> normalizedBoxes; // boxes normalized 0..1
+  final int peopleCount;
+
+  DetectedFrame({
+    this.imageBytes,
+    required this.normalizedBoxes,
+    required this.peopleCount,
+  });
+}
+
 class LiveFeedWindows extends StatefulWidget {
-  const LiveFeedWindows({super.key});
+  final bool openUpload;
+  const LiveFeedWindows({super.key, this.openUpload = false});
 
   @override
   State<LiveFeedWindows> createState() => _LiveFeedWindowsState();
@@ -32,13 +46,21 @@ class _LiveFeedWindowsState extends State<LiveFeedWindows> {
   String _brightnessCategory = 'Unknown';
   final Duration _captureInterval = const Duration(milliseconds: 600);
 
+  // Uploaded / detected frames from backend
+  // Toggle to re-enable live camera capture if needed
+  final bool _enableLiveCamera = true;
+
   @override
   void initState() {
     super.initState();
     _initRenderer();
-    _openCamera();
-    _startCaptureTimer();
-    _startWindowsDetection();
+    // Keep methods referenced by calling them conditionally to avoid
+    // analyzer errors when the camera-based flow is disabled.
+    if (_enableLiveCamera) {
+      _openCamera();
+      _startCaptureTimer();
+      _startWindowsDetection();
+    }
   }
 
   Future<void> _initRenderer() async {
@@ -193,6 +215,12 @@ class _LiveFeedWindowsState extends State<LiveFeedWindows> {
     }
   }
 
+  Future<void> _checkBackendHealth() async {
+    // Health checking removed per request. Previously this polled
+    // http://localhost:8000/health to determine model load status.
+    // No-op now.
+  }
+
   @override
   void dispose() {
     _localStream?.getTracks().forEach((t) => t.stop());
@@ -205,7 +233,18 @@ class _LiveFeedWindowsState extends State<LiveFeedWindows> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Live Feed (Windows)')),
+      appBar: AppBar(
+        title: const Text('Live Feed (Windows)'),
+        actions: [
+          IconButton(
+            tooltip: 'Home',
+            icon: const Icon(Icons.home),
+            onPressed: () {
+              Navigator.of(context).popUntil((route) => route.isFirst);
+            },
+          ),
+        ],
+      ),
       body: Center(
         child: Stack(
           alignment: Alignment.center,

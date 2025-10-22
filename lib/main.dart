@@ -4,6 +4,7 @@ import 'package:flutter/services.dart' show MissingPluginException;
 import 'pages/live_feed.dart';
 import 'dart:io' show Platform;
 import 'pages/live_feed_windows.dart';
+import 'pages/upload_video.dart';
 
 List<CameraDescription> cameras = [];
 
@@ -146,27 +147,44 @@ class _MyHomePageState extends State<MyHomePage> {
               style: Theme.of(context).textTheme.headlineMedium,
             ),
             const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: () {
-                // Use Windows-specific webcam page when on Windows.
-                try {
-                  if (Platform.isWindows) {
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ElevatedButton.icon(
+                  onPressed: () {
+                    // Use Windows-specific webcam page when on Windows.
+                    try {
+                      if (Platform.isWindows) {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const LiveFeedWindows(),
+                          ),
+                        );
+                        return;
+                      }
+                    } catch (_) {
+                      // Platform may not be available in some test environments.
+                    }
+                    // For other platforms use the existing route which will show
+                    // a camera preview if available or a placeholder otherwise.
+                    Navigator.of(context).pushNamed('/live');
+                  },
+                  icon: const Icon(Icons.videocam),
+                  label: const Text('Open Live Feed'),
+                ),
+                const SizedBox(width: 12),
+                ElevatedButton.icon(
+                  onPressed: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (_) => const LiveFeedWindows(),
+                        builder: (_) => const UploadVideoPage(),
                       ),
                     );
-                    return;
-                  }
-                } catch (_) {
-                  // Platform may not be available in some test environments.
-                }
-                // For other platforms use the existing route which will show
-                // a camera preview if available or a placeholder otherwise.
-                Navigator.of(context).pushNamed('/live');
-              },
-              icon: const Icon(Icons.videocam),
-              label: const Text('Open Live Feed'),
+                  },
+                  icon: const Icon(Icons.upload_file),
+                  label: const Text('Upload Video'),
+                ),
+              ],
             ),
           ],
         ),
