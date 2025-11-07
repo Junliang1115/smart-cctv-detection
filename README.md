@@ -32,3 +32,8 @@ UI design (modern dashboard style)
 Include example Flutter code for one page (e.g., Live Feed screen with a CCTV camera view and alert list).
 
 Suggest how to visualize AI detection results — e.g., bounding boxes or risk indicators overlaying the camera feed.
+
+python -m venv .venv  
+. .\.venv\Scripts\Activate.ps1
+
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000

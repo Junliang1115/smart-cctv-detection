@@ -5,6 +5,8 @@ from typing import List, Dict, Any
 from PIL import Image
 import io
 import numpy as np
+import time
+import asyncio
 import uvicorn
 import base64
 import cv2
@@ -17,15 +19,18 @@ app = FastAPI(title="Smart CCTV Detection API")
 
 # Load a YOLOv8 model. By default we use the small 'yolov8n.pt' for speed.
 # For production, replace with your trained model path or use a larger backbone.
-MODEL_PATH = "yolov8x.pt"
+# Use a smaller model by default for faster CPU inference during development.
+# Change to a larger model (yolov8x.pt) when you have GPU or more compute.
+MODEL_PATH = "yolov8n.pt"
+# Default inference image size (smaller = faster, less accurate)
+DEFAULT_IMGSZ = 320
 
 try:
     model = YOLO(MODEL_PATH)
-except Exception as e:
+except Exception:
     # We'll allow the server to start even if model fails to load; endpoints
     # will return 503 until the model is available.
     model = None
-    print(f"Warning: YOLO model failed to load: {e}")
 
 class DetectionBox(BaseModel):
     x: float
@@ -53,7 +58,7 @@ def _compute_brightness(pil_img: Image.Image) -> float:
 
 def _brightness_category(luma: float) -> str:
     if luma < 0.12:
-        return "Very dark"
+        return "Dark"
     if luma < 0.40:
         return "Shallow"
     return "Normal"
@@ -89,7 +94,10 @@ async def detect(image: UploadFile = File(...)):
     # Run YOLOv8 detection
     try:
         # Note: results = model(pil) returns list of Results; use .boxes
-        results = model(pil, imgsz=640, conf=0.25, verbose=False)
+        start_t = time.time()
+        # Run CPU-bound model inference in a thread so the async event loop isn't blocked
+        results = await asyncio.to_thread(lambda: model(pil, imgsz=DEFAULT_IMGSZ, conf=0.25, verbose=False))
+        # (no detailed debug prints)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Detection error: {e}")
 
@@ -130,13 +138,6 @@ async def detect(image: UploadFile = File(...)):
         'people_count': people_count,
         'boxes': boxes_out,
     }
-
-    # Log detection summary for debugging
-    try:
-        print(f"[detect] image size={pil.size} boxes={len(boxes_out)} people_count={people_count}")
-    except Exception:
-        pass
-
     return JSONResponse(content=resp)
 
 
@@ -189,7 +190,10 @@ async def detect_video(video: UploadFile = File(...), sample_rate: int = 15, con
 
             # run detection
             try:
-                results = model(pil, imgsz=640, conf=conf, verbose=False)
+                start_t = time.time()
+                # Offload model inference to a thread to avoid blocking the event loop
+                results = await asyncio.to_thread(lambda: model(pil, imgsz=DEFAULT_IMGSZ, conf=conf, verbose=False))
+                # (no detailed debug prints)
             except Exception as e:
                 cap.release()
                 raise HTTPException(status_code=500, detail=f"Detection error: {e}")

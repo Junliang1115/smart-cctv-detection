@@ -41,6 +41,7 @@ dependencies:
   flutter_webrtc: ^0.9.0
   # Simple HTTP client for uploading frames to detection backend
   http: ^0.13.6
+  # Native file picker for desktop/mobile file selection (removed due to SDK mismatch)
 
 dev_dependencies:
   flutter_test:

@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
-// Detection painter (duplicate of the one used elsewhere to avoid import cycles)
+// Detection painter
 class DetectionPainter extends CustomPainter {
   final List<Rect> boxes;
   DetectionPainter(this.boxes);
@@ -54,6 +54,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> {
   List<_DetectedFrame> _frames = [];
   int _current = 0;
   final PageController _pageController = PageController(initialPage: 0);
+  bool _hasAttemptedUpload = false;
 
   @override
   void initState() {
@@ -65,6 +66,8 @@ class _UploadVideoPageState extends State<UploadVideoPage> {
     _pageController.dispose();
     super.dispose();
   }
+
+  // Use native file picker instead of manual path entry on desktop
 
   Future<String?> _askForLocalPath() async {
     String? path;
@@ -108,6 +111,7 @@ class _UploadVideoPageState extends State<UploadVideoPage> {
   Future<void> _uploadVideoFile(String path) async {
     setState(() {
       _isUploading = true;
+      _hasAttemptedUpload = true;
       _uploadProgress = 0.0;
       _frames = [];
     });
@@ -173,107 +177,140 @@ class _UploadVideoPageState extends State<UploadVideoPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Upload Video for Detection')),
-      body: Column(
+      body: Stack(
         children: [
-          const SizedBox(height: 12),
-          ElevatedButton.icon(
-            onPressed: _isUploading ? null : _pickAndUpload,
-            icon: const Icon(Icons.upload_file),
-            label: const Text('Choose & Upload'),
-          ),
-          if (_isUploading) LinearProgressIndicator(value: _uploadProgress),
-          const SizedBox(height: 12),
-          Expanded(
-            child:
-                _frames.isEmpty
-                    ? const Center(child: Text('No results yet'))
-                    : Column(
-                      children: [
-                        Expanded(
-                          child: PageView.builder(
-                            controller: _pageController,
-                            itemCount: _frames.length,
-                            onPageChanged: (i) => setState(() => _current = i),
-                            itemBuilder: (ctx, i) {
-                              final f = _frames[i];
-                              return Stack(
+          Column(
+            children: [
+              const SizedBox(height: 12),
+              ElevatedButton.icon(
+                onPressed: _isUploading ? null : _pickAndUpload,
+                icon: const Icon(Icons.upload_file),
+                label: const Text('Choose & Upload'),
+              ),
+              if (_isUploading)
+                LinearProgressIndicator(
+                  value: _uploadProgress == 0.0 ? null : _uploadProgress,
+                ),
+              const SizedBox(height: 12),
+              Expanded(
+                child:
+                    _frames.isEmpty
+                        ? (_hasAttemptedUpload
+                            ? const Center(child: Text('No video found'))
+                            : const Center(child: Text('No results yet')))
+                        : Column(
+                          children: [
+                            Expanded(
+                              child: PageView.builder(
+                                controller: _pageController,
+                                itemCount: _frames.length,
+                                onPageChanged:
+                                    (i) => setState(() => _current = i),
+                                itemBuilder: (ctx, i) {
+                                  final f = _frames[i];
+                                  return Stack(
+                                    children: [
+                                      if (f.imageBytes != null)
+                                        Positioned.fill(
+                                          child: Image.memory(
+                                            f.imageBytes!,
+                                            fit: BoxFit.cover,
+                                          ),
+                                        ),
+                                      Positioned.fill(
+                                        child: IgnorePointer(
+                                          child: CustomPaint(
+                                            painter: DetectionPainter(f.boxes),
+                                          ),
+                                        ),
+                                      ),
+                                      Positioned(
+                                        left: 12,
+                                        top: 12,
+                                        child: Container(
+                                          padding: const EdgeInsets.all(6),
+                                          color: Colors.white70,
+                                          child: Text(
+                                            'Frame ${i + 1} — ${f.peopleCount} people',
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                },
+                              ),
+                            ),
+                            SizedBox(
+                              height: 48,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  if (f.imageBytes != null)
-                                    Positioned.fill(
-                                      child: Image.memory(
-                                        f.imageBytes!,
-                                        fit: BoxFit.cover,
-                                      ),
-                                    ),
-                                  Positioned.fill(
-                                    child: IgnorePointer(
-                                      child: CustomPaint(
-                                        painter: DetectionPainter(f.boxes),
-                                      ),
-                                    ),
+                                  IconButton(
+                                    onPressed:
+                                        (_current <= 0)
+                                            ? null
+                                            : () {
+                                              final prev = _current - 1;
+                                              _pageController.animateToPage(
+                                                prev,
+                                                duration: const Duration(
+                                                  milliseconds: 250,
+                                                ),
+                                                curve: Curves.easeInOut,
+                                              );
+                                            },
+                                    icon: const Icon(Icons.chevron_left),
                                   ),
-                                  Positioned(
-                                    left: 12,
-                                    top: 12,
-                                    child: Container(
-                                      padding: const EdgeInsets.all(6),
-                                      color: Colors.white70,
-                                      child: Text(
-                                        'Frame ${i + 1} — ${f.peopleCount} people',
-                                      ),
-                                    ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Frame ${_current + 1} / ${_frames.length}',
+                                  ),
+                                  const SizedBox(width: 8),
+                                  IconButton(
+                                    onPressed:
+                                        (_current >= _frames.length - 1)
+                                            ? null
+                                            : () {
+                                              final next = _current + 1;
+                                              _pageController.animateToPage(
+                                                next,
+                                                duration: const Duration(
+                                                  milliseconds: 250,
+                                                ),
+                                                curve: Curves.easeInOut,
+                                              );
+                                            },
+                                    icon: const Icon(Icons.chevron_right),
                                   ),
                                 ],
-                              );
-                            },
-                          ),
-                        ),
-                        SizedBox(
-                          height: 48,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              IconButton(
-                                onPressed:
-                                    (_current <= 0)
-                                        ? null
-                                        : () {
-                                          final prev = _current - 1;
-                                          _pageController.animateToPage(
-                                            prev,
-                                            duration: const Duration(
-                                              milliseconds: 250,
-                                            ),
-                                            curve: Curves.easeInOut,
-                                          );
-                                        },
-                                icon: const Icon(Icons.chevron_left),
                               ),
-                              const SizedBox(width: 8),
-                              Text('Frame ${_current + 1} / ${_frames.length}'),
-                              const SizedBox(width: 8),
-                              IconButton(
-                                onPressed:
-                                    (_current >= _frames.length - 1)
-                                        ? null
-                                        : () {
-                                          final next = _current + 1;
-                                          _pageController.animateToPage(
-                                            next,
-                                            duration: const Duration(
-                                              milliseconds: 250,
-                                            ),
-                                            curve: Curves.easeInOut,
-                                          );
-                                        },
-                                icon: const Icon(Icons.chevron_right),
-                              ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+              ),
+            ],
           ),
+
+          // Full-screen loading overlay while upload/analysis is in progress
+          if (_isUploading)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black54,
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 12),
+                      Text(
+                        'Analyzing video...',
+                        style: TextStyle(color: Colors.white, fontSize: 16),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );

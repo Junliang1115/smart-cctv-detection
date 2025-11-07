@@ -10,7 +10,8 @@ import 'dart:convert';
 // Person detection state (boxes are in widget coordinates)
 List<Rect> _windowsDetectedBoxes = [];
 Timer? _windowsDetectionTimer;
-final Duration _windowsDetectionInterval = const Duration(milliseconds: 700);
+// Increase detection interval and capture downscale to reduce backend load
+final Duration _windowsDetectionInterval = const Duration(milliseconds: 1000);
 
 // Backend config - change if your FastAPI server lives elsewhere
 const String _detectionBackendUrl = 'http://localhost:8000/detect';
@@ -49,6 +50,7 @@ class _LiveFeedWindowsState extends State<LiveFeedWindows> {
   // Uploaded / detected frames from backend
   // Toggle to re-enable live camera capture if needed
   final bool _enableLiveCamera = true;
+  bool _isDetecting = false;
 
   @override
   void initState() {
@@ -100,40 +102,66 @@ class _LiveFeedWindowsState extends State<LiveFeedWindows> {
     _windowsDetectionTimer = Timer.periodic(_windowsDetectionInterval, (
       _,
     ) async {
+      final boundary =
+          _videoKey.currentContext?.findRenderObject()
+              as RenderRepaintBoundary?;
+      if (boundary == null) return;
+
+      // capture a much smaller image for speed (reduce bytes sent)
+      // this lowers CPU and network load on the backend and helps keep
+      // live detection responsive while the server may be busy with video.
       try {
-        final boundary =
-            _videoKey.currentContext?.findRenderObject()
-                as RenderRepaintBoundary?;
-        if (boundary == null) return;
-        // capture a smaller image for speed
-        final ui.Image image = await boundary.toImage(pixelRatio: 0.5);
+        final ui.Image image = await boundary.toImage(pixelRatio: 0.25);
         final ByteData? byteData = await image.toByteData(
           format: ui.ImageByteFormat.png,
         );
         if (byteData == null) return;
         final bytes = byteData.buffer.asUint8List();
-        // Upload to backend and parse response
-        final resp = await _uploadImageForDetection(bytes);
-        if (resp != null) {
-          // Map normalized boxes to widget coordinates (we store normalized boxes)
-          // Store normalized boxes (relative 0..1). We'll scale in painter to widget size.
-          final List<Rect> mapped = [];
-          for (final b in resp['boxes'] as List) {
-            final double x = (b['x'] as num).toDouble();
-            final double y = (b['y'] as num).toDouble();
-            final double bw = (b['width'] as num).toDouble();
-            final double bh = (b['height'] as num).toDouble();
-            mapped.add(Rect.fromLTWH(x, y, bw, bh));
+
+        if (_isDetecting) return;
+        _isDetecting = true;
+
+        // upload initiated (debug prints removed)
+
+        Map<String, dynamic>? resp;
+        try {
+          resp = await _uploadImageForDetection(bytes);
+          if (resp != null) {
+            // Map normalized boxes to widget coordinates (we store normalized boxes)
+            // Store normalized boxes (relative 0..1). We'll scale in painter to widget size.
+            final List<Rect> mapped = [];
+            for (final b in resp['boxes'] as List) {
+              final double x = (b['x'] as num).toDouble();
+              final double y = (b['y'] as num).toDouble();
+              final double bw = (b['width'] as num).toDouble();
+              final double bh = (b['height'] as num).toDouble();
+              // Clamp values to 0..1 to avoid offscreen drawing if backend
+              // returns slightly out-of-range coordinates.
+              final double cx = x.clamp(0.0, 1.0);
+              final double cy = y.clamp(0.0, 1.0);
+              final double cbw = bw.clamp(0.0, 1.0);
+              final double cbh = bh.clamp(0.0, 1.0);
+              mapped.add(Rect.fromLTWH(cx, cy, cbw, cbh));
+            }
+
+            // detection results received (debug prints removed)
+
+            _windowsDetectedBoxes = mapped;
+            // prefer backend brightness if provided
+            if (resp.containsKey('brightness_category')) {
+              _brightnessCategory = resp['brightness_category'] as String;
+            }
+            if (mounted) setState(() {});
+
+            // mapping debug removed
           }
-          _windowsDetectedBoxes = mapped;
-          // prefer backend brightness if provided
-          if (resp.containsKey('brightness_category')) {
-            _brightnessCategory = resp['brightness_category'] as String;
-          }
-          if (mounted) setState(() {});
+        } finally {
+          // ensure the flag is always cleared so the periodic loop continues
+          _isDetecting = false;
         }
       } catch (e) {
-        // ignore detection errors
+        // ignore capture/detection errors and ensure flag cleared
+        _isDetecting = false;
       }
     });
   }
@@ -147,7 +175,7 @@ class _LiveFeedWindowsState extends State<LiveFeedWindows> {
           _videoKey.currentContext?.findRenderObject()
               as RenderRepaintBoundary?;
       if (boundary == null) return;
-      final ui.Image image = await boundary.toImage(pixelRatio: 0.5);
+      final ui.Image image = await boundary.toImage(pixelRatio: 0.25);
       final ByteData? byteData = await image.toByteData(
         format: ui.ImageByteFormat.rawRgba,
       );
@@ -173,7 +201,7 @@ class _LiveFeedWindowsState extends State<LiveFeedWindows> {
       // classify into three categories
       String cat;
       if (_smoothedLuma < 0.12) {
-        cat = 'Very dark';
+        cat = 'Dark';
       } else if (_smoothedLuma < 0.40) {
         cat = 'Shallow';
       } else {
@@ -210,15 +238,13 @@ class _LiveFeedWindowsState extends State<LiveFeedWindows> {
       }
       return null;
     } catch (e) {
-      // ignore network or timeout errors
-      return null;
+      if (mounted) {
+        setState(() {});
+      }
     }
-  }
-
-  Future<void> _checkBackendHealth() async {
-    // Health checking removed per request. Previously this polled
-    // http://localhost:8000/health to determine model load status.
-    // No-op now.
+    _isDetecting = false;
+    return null;
+    // ensure flag cleared on error
   }
 
   @override
